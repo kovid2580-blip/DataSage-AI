@@ -1,0 +1,13 @@
+.m2/
+.tools/
+
+backend/target/
+backend/*.log
+
+frontend/node_modules/
+frontend/dist/
+frontend/*.log
+frontend/.env
+
+.DS_Store
+Thumbs.db
