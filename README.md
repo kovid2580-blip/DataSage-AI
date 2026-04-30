@@ -92,4 +92,4 @@ The app runs at `http://localhost:5173`.
 - `spring.jpa.hibernate.ddl-auto=update` creates tables automatically for local development.
 - The dashboard always analyzes the most recently uploaded CSV.
 
-![image alt](Screenshot 2026-04-30 134903.png)
+![image alt](https://github.com/kovid2580-blip/DataSage-AI/blob/00fa28d46272aba1507132029e4abe07d1934bdc/Screenshot%202026-04-30%20134903.png)
