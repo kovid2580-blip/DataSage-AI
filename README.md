@@ -91,3 +91,5 @@ The app runs at `http://localhost:5173`.
 - If `openai.api.key` is still set to `YOUR_OPENAI_API_KEY`, the backend uses a simple local fallback to infer a query from the question and CSV headers.
 - `spring.jpa.hibernate.ddl-auto=update` creates tables automatically for local development.
 - The dashboard always analyzes the most recently uploaded CSV.
+
+![image alt](Screenshot 2026-04-30 134903.png)
