@@ -12,11 +12,12 @@ VITE_API_URL=https://your-backend-url/api
 
 ## Backend
 
-Deploy `backend` to Render as a Java web service.
+Deploy `backend` to Render as a Docker web service.
 
-Health check:
+Runtime and health check:
 
 ```txt
+Docker
 /api/health
 ```
 
