@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -93,8 +94,9 @@ public class OpenAiService {
                 lowerQuestion.contains("count") ? "count" :
                         lowerQuestion.contains("min") ? "min" :
                                 lowerQuestion.contains("max") ? "max" : "sum");
-        query.setGroupBy(findMentionedHeader(lowerQuestion, headers, headers.isEmpty() ? null : headers.get(0)));
-        query.setColumn(findMentionedHeader(lowerQuestion, headers, findLikelyNumericHeader(headers, query.getGroupBy())));
+        String groupBy = findMentionedHeader(lowerQuestion, headers, headers.isEmpty() ? null : headers.get(0));
+        query.setGroupBy(groupBy);
+        query.setColumn(resolveValueColumn(lowerQuestion, headers, groupBy, query.getAggregate()));
         return query;
     }
 
@@ -107,10 +109,74 @@ public class OpenAiService {
         return defaultHeader;
     }
 
+    private String resolveValueColumn(String lowerQuestion, List<String> headers, String groupBy, String aggregate) {
+        if ("count".equalsIgnoreCase(aggregate)) {
+            return findMentionedHeader(lowerQuestion, headers,
+                    headers.stream().filter(header -> !header.equals(groupBy)).findFirst().orElse(groupBy));
+        }
+
+        String explicitlyMentioned = headers.stream()
+                .filter(header -> !header.equals(groupBy))
+                .filter(header -> lowerQuestion.contains(header.toLowerCase()))
+                .findFirst()
+                .orElse(null);
+        if (explicitlyMentioned != null) {
+            return explicitlyMentioned;
+        }
+
+        String scoredMatch = headers.stream()
+                .filter(header -> !header.equals(groupBy))
+                .max(Comparator.comparingInt(header -> scoreHeaderForQuestion(lowerQuestion, header)))
+                .orElse(null);
+
+        if (scoredMatch != null && scoreHeaderForQuestion(lowerQuestion, scoredMatch) > 0) {
+            return scoredMatch;
+        }
+
+        return findLikelyNumericHeader(headers, groupBy);
+    }
+
+    private int scoreHeaderForQuestion(String lowerQuestion, String header) {
+        String normalizedHeader = header.toLowerCase().replace("_", " ");
+        int score = 0;
+
+        if (lowerQuestion.contains("sale") || lowerQuestion.contains("sales")) {
+            if (normalizedHeader.contains("revenue")) score += 6;
+            if (normalizedHeader.contains("sales")) score += 6;
+            if (normalizedHeader.contains("amount")) score += 5;
+            if (normalizedHeader.contains("units")) score += 4;
+            if (normalizedHeader.contains("quantity")) score += 4;
+        }
+        if (lowerQuestion.contains("revenue")) {
+            if (normalizedHeader.contains("revenue")) score += 8;
+            if (normalizedHeader.contains("sales")) score += 5;
+        }
+        if (lowerQuestion.contains("profit")) {
+            if (normalizedHeader.contains("profit")) score += 8;
+        }
+        if (lowerQuestion.contains("rating")) {
+            if (normalizedHeader.contains("rating")) score += 8;
+        }
+        if (lowerQuestion.contains("unit") || lowerQuestion.contains("quantity")) {
+            if (normalizedHeader.contains("units")) score += 7;
+            if (normalizedHeader.contains("quantity")) score += 7;
+            if (normalizedHeader.contains("qty")) score += 7;
+        }
+        if (lowerQuestion.contains("price") || lowerQuestion.contains("cost")) {
+            if (normalizedHeader.contains("price")) score += 7;
+            if (normalizedHeader.contains("cost")) score += 7;
+        }
+        if (normalizedHeader.matches(".*(amount|sales|price|total|revenue|profit|cost|value|quantity|qty|units|rating|score).*")) {
+            score += 2;
+        }
+
+        return score;
+    }
+
     private String findLikelyNumericHeader(List<String> headers, String groupBy) {
         return headers.stream()
                 .filter(header -> !header.equals(groupBy))
-                .filter(header -> header.toLowerCase().matches(".*(amount|sales|price|total|revenue|profit|cost|value|quantity|qty|count).*"))
+                .filter(header -> header.toLowerCase().matches(".*(amount|sales|price|total|revenue|profit|cost|value|quantity|qty|units|rating|score).*"))
                 .findFirst()
                 .orElse(headers.stream().filter(header -> !header.equals(groupBy)).findFirst().orElse(groupBy));
     }
