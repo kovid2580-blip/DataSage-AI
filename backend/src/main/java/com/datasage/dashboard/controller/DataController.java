@@ -46,4 +46,9 @@ public class DataController {
     public List<HistoryResponse> getHistory() {
         return queryService.getHistory();
     }
+
+    @GetMapping("/health")
+    public java.util.Map<String, String> health() {
+        return java.util.Map.of("status", "ok");
+    }
 }

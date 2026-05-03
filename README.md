@@ -27,7 +27,7 @@ README.md
 CREATE DATABASE ai_data_analyst;
 ```
 
-2. Update `backend/src/main/resources/application.properties`:
+2. Update `backend/src/main/resources/application.properties` or use environment variables:
 
 ```properties
 spring.datasource.username=postgres
@@ -42,7 +42,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-The API runs at `http://localhost:8080`.
+The API runs at `http://localhost:8080`, and health is available at `http://localhost:8080/api/health`.
 
 ## Frontend Setup
 
@@ -60,6 +60,13 @@ npm run dev
 ```
 
 The app runs at `http://localhost:5173`.
+
+## Deployment
+
+- Frontend: deploy `frontend` to Vercel and set `VITE_API_URL=https://your-backend-url/api`
+- Backend: deploy `backend` to Render and set `SPRING_PROFILES_ACTIVE=local` plus `APP_CORS_ALLOWED_ORIGINS=https://your-frontend-url`
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the exact values.
 
 ## API Endpoints
 
