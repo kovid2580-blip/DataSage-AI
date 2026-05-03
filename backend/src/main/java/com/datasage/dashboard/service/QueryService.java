@@ -10,6 +10,7 @@ import com.datasage.dashboard.repository.QueryHistoryRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.DoubleSummaryStatistics;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +40,7 @@ public class QueryService {
         List<String> headers = csvService.readHeaders(uploadedFile);
         List<Map<String, String>> rows = csvService.readRows(uploadedFile);
         StructuredQuery structuredQuery = openAiService.createStructuredQuery(question, headers);
+        repairStructuredQuery(question, structuredQuery, headers, rows);
         validateStructuredQuery(structuredQuery, headers);
 
         ChartResponse response = processRows(rows, structuredQuery);
@@ -91,6 +93,158 @@ public class QueryService {
         if (query.getChartType() == null || query.getChartType().isBlank()) {
             query.setChartType("bar");
         }
+    }
+
+    private void repairStructuredQuery(String question, StructuredQuery query, List<String> headers, List<Map<String, String>> rows) {
+        String lowerQuestion = question.toLowerCase();
+
+        String inferredGroupBy = inferGroupByFromQuestion(lowerQuestion, headers);
+        if (inferredGroupBy != null) {
+            query.setGroupBy(inferredGroupBy);
+        } else {
+            query.setGroupBy(matchHeader(query.getGroupBy(), headers));
+        }
+
+        if (query.getGroupBy() == null || !headers.contains(query.getGroupBy())) {
+            query.setGroupBy(headers.isEmpty() ? null : headers.get(0));
+        }
+
+        if (query.getAggregate() == null || query.getAggregate().isBlank()) {
+            query.setAggregate("sum");
+        }
+
+        if ("count".equalsIgnoreCase(query.getAggregate())) {
+            return;
+        }
+
+        query.setColumn(matchHeader(query.getColumn(), headers));
+
+        boolean invalidMetricChoice = query.getColumn() == null
+                || !headers.contains(query.getColumn())
+                || query.getColumn().equals(query.getGroupBy())
+                || !isMostlyNumericColumn(rows, query.getColumn())
+                || allNumericValuesAreZero(rows, query.getColumn());
+
+        if (invalidMetricChoice) {
+            String repairedColumn = chooseBestMetricColumn(lowerQuestion, headers, rows, query.getGroupBy());
+            if (repairedColumn != null) {
+                query.setColumn(repairedColumn);
+            }
+        }
+    }
+
+    private String inferGroupByFromQuestion(String lowerQuestion, List<String> headers) {
+        return headers.stream()
+                .filter(header -> lowerQuestion.contains(normalizeHeader(header)))
+                .findFirst()
+                .orElseGet(() -> {
+                    int byIndex = lowerQuestion.indexOf(" by ");
+                    if (byIndex < 0) {
+                        return null;
+                    }
+                    String trailingPhrase = lowerQuestion.substring(byIndex + 4);
+                    return headers.stream()
+                            .filter(header -> trailingPhrase.contains(normalizeHeader(header)))
+                            .findFirst()
+                            .orElse(null);
+                });
+    }
+
+    private String chooseBestMetricColumn(String lowerQuestion, List<String> headers, List<Map<String, String>> rows, String groupBy) {
+        return headers.stream()
+                .filter(header -> !header.equals(groupBy))
+                .filter(header -> isMostlyNumericColumn(rows, header))
+                .max(Comparator.comparingInt(header -> scoreMetricColumn(lowerQuestion, header)))
+                .orElseGet(() -> headers.stream()
+                        .filter(header -> !header.equals(groupBy))
+                        .filter(header -> isMostlyNumericColumn(rows, header))
+                        .findFirst()
+                        .orElse(null));
+    }
+
+    private int scoreMetricColumn(String lowerQuestion, String header) {
+        String normalizedHeader = normalizeHeader(header);
+        int score = 0;
+
+        if (lowerQuestion.contains("sale") || lowerQuestion.contains("sales")) {
+            if (normalizedHeader.contains("revenue")) score += 10;
+            if (normalizedHeader.contains("sales")) score += 9;
+            if (normalizedHeader.contains("amount")) score += 8;
+            if (normalizedHeader.contains("units")) score += 7;
+            if (normalizedHeader.contains("quantity")) score += 7;
+        }
+        if (lowerQuestion.contains("revenue")) {
+            if (normalizedHeader.contains("revenue")) score += 12;
+        }
+        if (lowerQuestion.contains("profit")) {
+            if (normalizedHeader.contains("profit")) score += 12;
+        }
+        if (lowerQuestion.contains("rating")) {
+            if (normalizedHeader.contains("rating")) score += 12;
+        }
+        if (lowerQuestion.contains("unit") || lowerQuestion.contains("quantity")) {
+            if (normalizedHeader.contains("units")) score += 10;
+            if (normalizedHeader.contains("quantity")) score += 10;
+            if (normalizedHeader.contains("qty")) score += 10;
+        }
+        if (lowerQuestion.contains("price") || lowerQuestion.contains("cost")) {
+            if (normalizedHeader.contains("price")) score += 10;
+            if (normalizedHeader.contains("cost")) score += 10;
+        }
+        if (normalizedHeader.matches(".*(revenue|sales|amount|profit|units|quantity|qty|price|cost|value|total|rating|score).*")) {
+            score += 2;
+        }
+
+        return score;
+    }
+
+    private boolean isMostlyNumericColumn(List<Map<String, String>> rows, String column) {
+        int nonBlankValues = 0;
+        int numericValues = 0;
+
+        for (Map<String, String> row : rows) {
+            String rawValue = row.get(column);
+            if (rawValue == null || rawValue.isBlank()) {
+                continue;
+            }
+            nonBlankValues++;
+            if (isNumeric(rawValue)) {
+                numericValues++;
+            }
+        }
+
+        return nonBlankValues > 0 && numericValues >= Math.max(1, nonBlankValues / 2);
+    }
+
+    private boolean allNumericValuesAreZero(List<Map<String, String>> rows, String column) {
+        boolean foundNumeric = false;
+        for (Map<String, String> row : rows) {
+            String rawValue = row.get(column);
+            if (!isNumeric(rawValue)) {
+                continue;
+            }
+            foundNumeric = true;
+            if (parseNumber(rawValue) != 0) {
+                return false;
+            }
+        }
+        return foundNumeric;
+    }
+
+    private boolean isNumeric(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return false;
+        }
+        try {
+            Double.parseDouble(rawValue.replaceAll("[,$%]", "").trim());
+            return true;
+        } catch (NumberFormatException exception) {
+            return false;
+        }
+    }
+
+    private String normalizeHeader(String header) {
+        return header.toLowerCase().replace("_", " ").trim();
     }
 
     private String matchHeader(String selectedHeader, List<String> headers) {
